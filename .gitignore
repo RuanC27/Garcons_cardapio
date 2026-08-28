@@ -1,0 +1,13 @@
+target/
+.idea/
+.vscode/
+*.iml
+
+.classpath
+.project
+.settings/
+
+cardapio.db
+*.db
+
+imagens/
