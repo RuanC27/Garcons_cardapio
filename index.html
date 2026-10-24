@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gourmet | Painel dos Garçons</title>
+  <link rel="stylesheet" href="css/garcom.css">
+</head>
+<body>
+  <header class="topo">
+    <a class="marca" href="./" aria-label="Gourmet - Painel dos garçons">
+      <span class="marca-principal">GOURMET</span>
+      <span class="marca-subtitulo">PAINEL DOS GARÇONS</span>
+    </a>
+    <div class="topo-acoes">
+      <span class="atualizacao" id="ultimaAtualizacao">Carregando comandas...</span>
+      <button id="atualizarBtn" class="botao botao-claro">↻ Atualizar</button>
+    </div>
+  </header>
+
+  <main class="principal">
+    <section class="cabecalho-pagina">
+      <div>
+        <p class="sobretitulo">ATENDIMENTO</p>
+        <h1>Comandas</h1>
+        <p class="introducao">Acompanhe as mesas, confira os pedidos e atualize o atendimento.</p>
+      </div>
+      <div class="indicador"><span class="indicador-ponto"></span><span id="contadorAbertas">0 comandas abertas</span></div>
+    </section>
+
+    <section class="resumos" aria-label="Resumo dos pedidos">
+      <article class="resumo"><span>Aguardando confirmação</span><strong id="contAguardando">0</strong></article>
+      <article class="resumo"><span>Em andamento</span><strong id="contAndamento">0</strong></article>
+      <article class="resumo"><span>Prontos para servir</span><strong id="contProntos">0</strong></article>
+    </section>
+
+    <div class="barra-lista">
+      <h2>Mesas em atendimento</h2>
+      <label class="filtro-label" for="filtroStatus">Filtrar
+        <select id="filtroStatus">
+          <option value="todas">Todas as comandas</option>
+          <option value="aguardando_confirmacao">Aguardando confirmação</option>
+          <option value="andamento">Em andamento</option>
+          <option value="pronto">Prontos para servir</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="mensagem" class="mensagem" role="status">Carregando comandas do Supabase...</div>
+    <section id="listaComandas" class="grade-comandas" aria-live="polite"></section>
+    <p class="nota-seguranca">Se as comandas não aparecerem, confira as políticas de SELECT no Supabase para as tabelas comanda, pedido e item_pedido.</p>
+  </main>
+
+  <dialog id="modalComanda" class="modal">
+    <div class="modal-cabecalho">
+      <div><p class="sobretitulo">DETALHES DO ATENDIMENTO</p><h2 id="tituloModal">Mesa</h2></div>
+      <button id="fecharModal" class="fechar" aria-label="Fechar">×</button>
+    </div>
+    <div id="detalhesComanda" class="detalhes-comanda"></div>
+    <div class="modal-rodape"><button id="encerrarBtn" class="botao botao-perigo">Encerrar comanda</button></div>
+  </dialog>
+  <script src="js/garcom.js"></script>
+</body>
+</html>
