@@ -621,6 +621,7 @@ function opcoesStatus(pedido) {
     `).join("");
 }
 
+
 function abrirComanda(id) {
     comandaSelecionada = comandas.find(
         c => String(c.id) === String(id)
@@ -628,82 +629,180 @@ function abrirComanda(id) {
 
     if (!comandaSelecionada) return;
 
+    const modalElemento = $("modalComanda");
+
     $("tituloModal").textContent =
         `Mesa ${comandaSelecionada.numero_mesa}`;
 
     const pedidos =
         pedidosPorComanda.get(String(id)) || [];
 
-    $("detalhesComanda").innerHTML = pedidos.map(pedido => {
-        const itens =
-            itensPorPedido.get(String(pedido.id)) || [];
-
-        const linhas = itens.map(item => {
-            const prato = pratosPorId.get(String(item.prato_id));
-            const nome = prato?.nome || `Prato #${item.prato_id}`;
-
-            const subtotal = item.subtotal ??
-                Number(item.quantidade) * Number(item.preco_unitario);
-
-            return `
-                <li>
-                    ${seguro(item.quantidade)} ×
-                    ${seguro(nome)} — ${brl(subtotal)}
-                </li>
-            `;
-        }).join("");
-
-        const total = itens.reduce((soma, item) => {
-            return soma + Number(
-                item.subtotal ??
-                Number(item.quantidade) * Number(item.preco_unitario)
-            );
-        }, 0);
-
-        return `
-            <section class="pedido-bloco">
-                <div class="pedido-cabecalho">
-                    <div>
-                        <h3>Pedido #${pedido.id}</h3>
-                        <span class="meta">${dataHora(pedido.criado_em)}</span>
-                    </div>
-
-                    <span class="selo ${classeStatus(pedido.status)}">
-                        ${seguro(rotuloStatus(pedido.status))}
-                    </span>
-                </div>
-
-                <ul class="pedido-itens">
-                    ${linhas || "<li>Itens não encontrados</li>"}
-                </ul>
-
-                <p><strong>Total: ${brl(total)}</strong></p>
-
-                <div class="acoes-cartao">
-                    ${opcoesStatus(pedido)}
-                </div>
-            </section>
+    if (!pedidos.length) {
+        $("detalhesComanda").innerHTML = `
+            <div class="vazio">
+                <strong>Nenhum pedido registrado</strong>
+                Esta comanda ainda não possui pedidos.
+            </div>
         `;
-    }).join("") || `
-        <div class="vazio">
-            <strong>Esta comanda ainda não tem pedidos</strong>
-        </div>
-    `;
+    } else {
+        $("detalhesComanda").innerHTML = `
+            <div class="detalhes-resumo">
+                <div>
+                    <span>Mesa</span>
+                    <strong>${seguro(comandaSelecionada.numero_mesa)}</strong>
+                </div>
+                <div>
+                    <span>Pedidos</span>
+                    <strong>${pedidos.length}</strong>
+                </div>
+                <div>
+                    <span>Total da comanda</span>
+                    <strong>${brl(totalComanda(comandaSelecionada))}</strong>
+                </div>
+                <div>
+                    <span>Aberta em</span>
+                    <strong>${dataHora(comandaSelecionada.aberta_em)}</strong>
+                </div>
+            </div>
 
-    $("detalhesComanda").querySelectorAll("[data-status]").forEach(botao => {
-        botao.addEventListener("click", () => {
-            atualizarStatus(
-                botao.dataset.pedido,
-                botao.dataset.status
-            );
+            <h3 class="titulo-pedidos">Pedidos desta mesa</h3>
+
+            ${pedidos.map(pedido => {
+                const itens =
+                    itensPorPedido.get(String(pedido.id)) || [];
+
+                const totalPedido = itens.reduce((soma, item) => {
+                    return soma + Number(
+                        item.subtotal ??
+                        Number(item.quantidade) *
+                        Number(item.preco_unitario)
+                    );
+                }, 0);
+
+                return `
+                    <section class="pedido-bloco">
+                        <div class="pedido-cabecalho">
+                            <div>
+                                <h3>Pedido #${pedido.id}</h3>
+                                <span class="meta">
+                                    Registrado em ${dataHora(pedido.criado_em)}
+                                </span>
+                            </div>
+
+                            <span class="selo ${classeStatus(pedido.status)}">
+                                ${seguro(rotuloStatus(pedido.status))}
+                            </span>
+                        </div>
+
+                        <h4 class="subtitulo-itens">Itens do pedido</h4>
+
+                        <div class="tabela-itens">
+                            ${itens.map(item => {
+                                const prato = pratosPorId.get(
+                                    String(item.prato_id)
+                                );
+
+                                const nome = prato?.nome ||
+                                    `Prato #${item.prato_id}`;
+
+                                const subtotal = item.subtotal ??
+                                    Number(item.quantidade) *
+                                    Number(item.preco_unitario);
+
+                                return `
+                                    <div class="linha-item">
+                                        <div>
+                                            <strong>${seguro(nome)}</strong>
+                                            <small>
+                                                ${item.quantidade} ×
+                                                ${brl(item.preco_unitario)}
+                                            </small>
+                                        </div>
+
+                                        <strong>${brl(subtotal)}</strong>
+                                    </div>
+                                `;
+                            }).join("")}
+                        </div>
+
+                        <div class="total-pedido">
+                            <span>Total do pedido</span>
+                            <strong>${brl(totalPedido)}</strong>
+                        </div>
+
+                        <div class="editar-status">
+                            <label for="status-${pedido.id}">
+                                Alterar status deste pedido
+                            </label>
+
+                            <div class="editar-status-controles">
+                                <select id="status-${pedido.id}">
+                                    <option value="aguardando_confirmacao"
+                                        ${pedido.status === "aguardando_confirmacao" ? "selected" : ""}>
+                                        Aguardando confirmação
+                                    </option>
+
+                                    <option value="aceito"
+                                        ${pedido.status === "aceito" ? "selected" : ""}>
+                                        Aceito
+                                    </option>
+
+                                    <option value="preparando"
+                                        ${pedido.status === "preparando" ? "selected" : ""}>
+                                        Preparando
+                                    </option>
+
+                                    <option value="pronto"
+                                        ${pedido.status === "pronto" ? "selected" : ""}>
+                                        Pronto para servir
+                                    </option>
+
+                                    <option value="entregue"
+                                        ${pedido.status === "entregue" ? "selected" : ""}>
+                                        Entregue
+                                    </option>
+
+                                    <option value="recusado"
+                                        ${pedido.status === "recusado" ? "selected" : ""}>
+                                        Recusado
+                                    </option>
+                                </select>
+
+                                <button
+                                    type="button"
+                                    class="botao botao-primario botao-pequeno"
+                                    data-salvar-status="${pedido.id}">
+                                    Salvar status
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+                `;
+            }).join("")}
+        `;
+    }
+
+    // Liga os botões de salvar status
+    $("detalhesComanda")
+        .querySelectorAll("[data-salvar-status]")
+        .forEach(botao => {
+            botao.addEventListener("click", () => {
+                const pedidoId = botao.dataset.salvarStatus;
+                const novoStatus = $(`status-${pedidoId}`).value;
+
+                atualizarStatus(pedidoId, novoStatus);
+            });
         });
-    });
 
-    $("encerrarBtn").disabled = pedidos.some(p =>
-        !["entregue", "recusado"].includes(p.status)
+    const podeEncerrar = pedidos.every(p =>
+        ["entregue", "recusado"].includes(p.status)
     );
 
-    modal.showModal();
+    $("encerrarBtn").disabled = !podeEncerrar;
+
+    if (!modalElemento.open) {
+        modalElemento.showModal();
+    }
 }
 
 async function atualizarStatus(pedidoId, status) {
