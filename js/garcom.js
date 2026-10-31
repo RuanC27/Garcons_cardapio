@@ -805,45 +805,65 @@ function abrirComanda(id) {
     }
 }
 
+
 async function atualizarStatus(pedidoId, status) {
+    const pedidoAtual = [...pedidosPorComanda.values()]
+        .flat()
+        .find(p => String(p.id) === String(pedidoId));
+
+    if (!pedidoAtual) {
+        alert("Pedido não encontrado.");
+        return;
+    }
+
+    if (pedidoAtual.status === status) {
+        alert("Este pedido já está com esse status.");
+        return;
+    }
+
     if (!confirm(
-        `Alterar o pedido para "${rotuloStatus(status)}"?`
-    )) return;
+        `Deseja alterar o status para "${rotuloStatus(status)}"?`
+    )) {
+        return;
+    }
 
     try {
-        await api(`pedido?id=eq.${encodeURIComponent(pedidoId)}`, {
-            method: "PATCH",
-            headers: { Prefer: "return=minimal" },
-            body: JSON.stringify({
-                status,
-                atualizado_em: new Date().toISOString()
-            })
-        });
+        await api(
+            `pedido?id=eq.${encodeURIComponent(pedidoId)}`,
+            {
+                method: "PATCH",
+                headers: {
+                    Prefer: "return=minimal"
+                },
+                body: JSON.stringify({
+                    status: status,
+                    atualizado_em: new Date().toISOString()
+                })
+            }
+        );
 
         const idComanda = comandaSelecionada?.id;
 
         await carregarDados();
 
         if (idComanda) {
-            const aindaAberta = comandas.find(
+            const comandaAtualizada = comandas.find(
                 c => String(c.id) === String(idComanda)
             );
 
-            if (aindaAberta) {
+            if (comandaAtualizada) {
                 abrirComanda(idComanda);
             } else {
-                modal.close();
+                $("modalComanda").close();
                 comandaSelecionada = null;
             }
         }
 
     } catch (erro) {
-        alert(`Erro ao atualizar pedido: ${erro.message}`);
+        alert(`Não foi possível atualizar o status: ${erro.message}`);
         console.error(erro);
     }
 }
-
-/* Fecha a comanda, mas NÃO exclui o histórico. */
 
 async function encerrarComanda() {
     if (!comandaSelecionada) return;
@@ -905,6 +925,7 @@ $("atualizarBtn").addEventListener("click", async () => {
 });
 
 $("filtroStatus").addEventListener("change", renderizarComandas);
+
 
 $("fecharModal").addEventListener("click", () => {
     $("modalComanda").close();
