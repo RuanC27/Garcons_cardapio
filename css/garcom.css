@@ -536,3 +536,121 @@ select {
     .modal-rodape { flex-direction: column; align-items: stretch; }
     .modal-rodape button { width: 100%; }
 }
+
+/* DETALHES DA COMANDA */
+
+.detalhes-resumo {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    background: #fff7f3;
+    border: 1px solid var(--borda);
+    border-radius: 13px;
+    padding: 16px;
+    margin-bottom: 22px;
+}
+
+.detalhes-resumo div {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.detalhes-resumo span {
+    color: var(--suave);
+    font-size: 11px;
+}
+
+.detalhes-resumo strong {
+    font-size: 15px;
+}
+
+.titulo-pedidos {
+    margin: 0 0 13px;
+}
+
+.subtitulo-itens {
+    font-size: 13px;
+    margin: 14px 0 8px;
+}
+
+.tabela-itens {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.linha-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--borda);
+}
+
+.linha-item div {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.linha-item strong {
+    font-size: 13px;
+}
+
+.linha-item small {
+    color: var(--suave);
+    font-size: 11px;
+}
+
+.total-pedido {
+    display: flex;
+    justify-content: space-between;
+    padding: 13px 0;
+    border-top: 1px solid var(--borda);
+    margin-top: 8px;
+}
+
+.total-pedido strong {
+    font-size: 17px;
+}
+
+.editar-status {
+    background: #fff7f3;
+    border: 1px solid var(--borda);
+    border-radius: 11px;
+    padding: 13px;
+    margin-top: 15px;
+}
+
+.editar-status label {
+    display: block;
+    font-size: 12px;
+    font-weight: bold;
+    margin-bottom: 9px;
+}
+
+.editar-status-controles {
+    display: flex;
+    gap: 9px;
+}
+
+.editar-status-controles select {
+    flex: 1;
+    min-width: 0;
+}
+
+@media(max-width: 500px) {
+    .detalhes-resumo {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .editar-status-controles {
+        flex-direction: column;
+    }
+
+    .editar-status-controles button {
+        width: 100%;
+    }
+}
