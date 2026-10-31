@@ -1,4 +1,3 @@
-/* Painel independente dos garçons. Usa o projeto Supabase do cardápio. */
 
 const SUPABASE_URL = "https://fmwmgoxjmcvsmfbcpfsj.supabase.co";
 const SUPABASE_KEY = "sb_publishable_ZJR2Z6gOfNO5rFhZb-RWwg_qvyY2b9Y";
@@ -8,168 +7,420 @@ const headers = {
     "Content-Type": "application/json"
 };
 
-const lista = document.getElementById("listaComandas");
-const mensagem = document.getElementById("mensagem");
-const filtro = document.getElementById("filtroStatus");
-const modal = document.getElementById("modalComanda");
+const $ = id => document.getElementById(id);
+
+let pratos = [];
+let carrinho = [];
+let categoriaAtiva = "Todas";
 
 let comandas = [];
-let comandaSelecionada = null;
 let pedidosPorComanda = new Map();
 let itensPorPedido = new Map();
 let pratosPorId = new Map();
+let comandaSelecionada = null;
+let carregando = false;
 
-const brl = valor =>
-    Number(valor || 0).toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL"
-    });
+const brl = valor => Number(valor || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+});
 
-const dataHora = valor =>
-    valor
-        ? new Date(valor).toLocaleString("pt-BR", {
-              dateStyle: "short",
-              timeStyle: "short"
-          })
-        : "—";
+const dataHora = valor => valor
+    ? new Date(valor).toLocaleString("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "short"
+    })
+    : "—";
 
-const textoSeguro = valor =>
-    String(valor ?? "").replace(/[&<>"']/g, caractere => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;"
-    })[caractere]);
+const seguro = valor => String(valor ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+})[c]);
 
 async function api(caminho, opcoes = {}) {
-    const resposta = await fetch(
-        `${SUPABASE_URL}/rest/v1/${caminho}`,
-        {
-            ...opcoes,
-            headers: {
-                ...headers,
-                ...(opcoes.headers || {})
-            }
+    const resposta = await fetch(`${SUPABASE_URL}/rest/v1/${caminho}`, {
+        ...opcoes,
+        headers: {
+            ...headers,
+            ...(opcoes.headers || {})
         }
-    );
+    });
 
     const corpo = await resposta.text();
 
     if (!resposta.ok) {
-        throw new Error(
-            `Supabase (${resposta.status}): ${corpo || resposta.statusText}`
-        );
+        throw new Error(`Supabase (${resposta.status}): ${corpo}`);
     }
 
     return corpo ? JSON.parse(corpo) : null;
 }
 
-async function carregarDados() {
-    mensagem.textContent = "Carregando comandas do Supabase...";
+/* =========================
+   CARDÁPIO E MONTAGEM
+========================= */
+
+async function carregarPratos() {
+    $("mensagemPratos").textContent = "Carregando cardápio...";
 
     try {
-        const abertas = await api(
-            "comanda?select=*&status=eq.aberta&order=aberta_em.desc"
-        );
+        pratos = await api(
+            "prato?select=id,nome,descricao,categoria,preco,imagem&order=nome.asc"
+        ) || [];
 
-        comandas = abertas || [];
+        renderizarCategorias();
+        renderizarPratos();
 
-        if (!comandas.length) {
-            pedidosPorComanda = new Map();
-            itensPorPedido = new Map();
-            pratosPorId = new Map();
+        $("mensagemPratos").textContent = pratos.length
+            ? ""
+            : "Nenhum prato cadastrado.";
+    } catch (erro) {
+        $("mensagemPratos").textContent =
+            `Erro ao carregar pratos: ${erro.message}`;
+        console.error(erro);
+    }
+}
 
-            atualizarResumo();
-            renderizar();
+function renderizarCategorias() {
+    const categorias = [
+        "Todas",
+        ...new Set(pratos.map(p => p.categoria).filter(Boolean))
+    ];
 
-            mensagem.textContent = "Nenhuma comanda aberta no momento.";
+    $("categoriasPratos").innerHTML = categorias.map(categoria => `
+        <button
+            type="button"
+            class="categoria-btn ${categoria === categoriaAtiva ? "ativa" : ""}"
+            data-categoria="${seguro(categoria)}">
+            ${seguro(categoria)}
+        </button>
+    `).join("");
 
-            document.getElementById("ultimaAtualizacao").textContent =
-                `Atualizado às ${new Date().toLocaleTimeString("pt-BR", {
-                    hour: "2-digit",
-                    minute: "2-digit"
-                })}`;
-
-            return;
-        }
-
-        const comandaIds = comandas.map(comanda => comanda.id);
-
-        const pedidos = await api(
-            `pedido?select=*&comanda_id=in.(${comandaIds.join(",")})&order=criado_em.desc`
-        );
-
-        pedidosPorComanda = new Map(
-            comandas.map(comanda => [String(comanda.id), []])
-        );
-
-        (pedidos || []).forEach(pedido => {
-            const chave = String(pedido.comanda_id);
-
-            if (!pedidosPorComanda.has(chave)) {
-                pedidosPorComanda.set(chave, []);
-            }
-
-            pedidosPorComanda.get(chave).push(pedido);
+    document.querySelectorAll("[data-categoria]").forEach(botao => {
+        botao.addEventListener("click", () => {
+            categoriaAtiva = botao.dataset.categoria;
+            renderizarCategorias();
+            renderizarPratos();
         });
+    });
+}
 
-        const pedidoIds = (pedidos || []).map(pedido => pedido.id);
+function renderizarPratos() {
+    const pesquisa = $("pesquisaPratos").value
+        .trim()
+        .toLocaleLowerCase("pt-BR");
 
-        itensPorPedido = new Map(
-            (pedidos || []).map(pedido => [String(pedido.id), []])
+    const filtrados = pratos.filter(prato => {
+        const categoriaOk =
+            categoriaAtiva === "Todas" ||
+            prato.categoria === categoriaAtiva;
+
+        const texto =
+            `${prato.nome} ${prato.descricao || ""} ${prato.categoria || ""}`
+            .toLocaleLowerCase("pt-BR");
+
+        return categoriaOk && texto.includes(pesquisa);
+    });
+
+    $("catalogoPratos").innerHTML = filtrados.map(prato => `
+        <article class="prato-card">
+            <img
+                src="${seguro(prato.imagem || "https://via.placeholder.com/240x180?text=Sem+imagem")}"
+                alt="${seguro(prato.nome)}"
+                onerror="this.style.display='none'">
+
+            <div class="prato-info">
+                <h4>${seguro(prato.nome)}</h4>
+                <p>${seguro(prato.descricao || prato.categoria || "")}</p>
+
+                <div class="prato-rodape">
+                    <span class="prato-preco">${brl(prato.preco)}</span>
+                    <button
+                        type="button"
+                        class="adicionar-btn"
+                        data-adicionar="${prato.id}">
+                        + Adicionar
+                    </button>
+                </div>
+            </div>
+        </article>
+    `).join("") || `
+        <div class="vazio">
+            <strong>Nenhum prato encontrado</strong>
+            Tente outra pesquisa ou categoria.
+        </div>
+    `;
+
+    document.querySelectorAll("[data-adicionar]").forEach(botao => {
+        botao.addEventListener("click", () => {
+            adicionarCarrinho(botao.dataset.adicionar);
+        });
+    });
+}
+
+function adicionarCarrinho(id) {
+    const prato = pratos.find(p => String(p.id) === String(id));
+    if (!prato) return;
+
+    const existente = carrinho.find(
+        item => String(item.prato.id) === String(id)
+    );
+
+    if (existente) {
+        existente.quantidade++;
+    } else {
+        carrinho.push({ prato, quantidade: 1 });
+    }
+
+    renderizarCarrinho();
+}
+
+function alterarQuantidade(id, diferenca) {
+    const item = carrinho.find(
+        i => String(i.prato.id) === String(id)
+    );
+
+    if (!item) return;
+
+    item.quantidade += diferenca;
+
+    if (item.quantidade <= 0) {
+        carrinho = carrinho.filter(
+            i => String(i.prato.id) !== String(id)
+        );
+    }
+
+    renderizarCarrinho();
+}
+
+function renderizarCarrinho() {
+    const quantidade = carrinho.reduce(
+        (soma, item) => soma + item.quantidade, 0
+    );
+
+    const total = carrinho.reduce(
+        (soma, item) =>
+            soma + Number(item.prato.preco || 0) * item.quantidade,
+        0
+    );
+
+    $("quantidadeCarrinho").textContent =
+        `${quantidade} ${quantidade === 1 ? "item" : "itens"}`;
+
+    $("totalCarrinho").textContent = brl(total);
+
+    $("itensCarrinho").innerHTML = carrinho.length
+        ? carrinho.map(item => `
+            <div class="item-carrinho">
+                <div>
+                    <strong>${seguro(item.prato.nome)}</strong>
+                    <small>
+                        ${brl(item.prato.preco)} cada —
+                        ${brl(Number(item.prato.preco || 0) * item.quantidade)}
+                    </small>
+                </div>
+
+                <div class="controles-item">
+                    <button data-diminuir="${item.prato.id}">−</button>
+                    <strong>${item.quantidade}</strong>
+                    <button data-aumentar="${item.prato.id}">+</button>
+                    <button class="remover-item" data-remover="${item.prato.id}">×</button>
+                </div>
+            </div>
+        `).join("")
+        : `<p class="carrinho-vazio">Nenhum prato adicionado.</p>`;
+
+    document.querySelectorAll("[data-diminuir]").forEach(botao => {
+        botao.addEventListener("click", () =>
+            alterarQuantidade(botao.dataset.diminuir, -1)
+        );
+    });
+
+    document.querySelectorAll("[data-aumentar]").forEach(botao => {
+        botao.addEventListener("click", () =>
+            alterarQuantidade(botao.dataset.aumentar, 1)
+        );
+    });
+
+    document.querySelectorAll("[data-remover]").forEach(botao => {
+        botao.addEventListener("click", () => {
+            carrinho = carrinho.filter(
+                i => String(i.prato.id) !== String(botao.dataset.remover)
+            );
+            renderizarCarrinho();
+        });
+    });
+
+    $("confirmarComandaBtn").disabled = !carrinho.length;
+}
+
+/* Cria um pedido dentro da comanda aberta da mesa. */
+
+async function criarPedidoGarcom() {
+    const mesa = $("numeroMesa").value.trim();
+
+    if (!mesa || !Number.isInteger(Number(mesa)) || Number(mesa) < 1) {
+        alert("Informe um número de mesa válido.");
+        $("numeroMesa").focus();
+        return;
+    }
+
+    if (!carrinho.length) {
+        alert("Adicione pelo menos um prato.");
+        return;
+    }
+
+    const botao = $("confirmarComandaBtn");
+    botao.disabled = true;
+    botao.textContent = "Salvando pedido...";
+
+    try {
+        const existentes = await api(
+            `comanda?select=id,numero_mesa&numero_mesa=eq.${encodeURIComponent(mesa)}&status=eq.aberta&order=aberta_em.desc&limit=1`
         );
 
-        pratosPorId = new Map();
+        let comandaId;
 
-        if (pedidoIds.length) {
-            const itens = await api(
-                `item_pedido?select=*&pedido_id=in.(${pedidoIds.join(",")})&order=id.asc`
-            );
-
-            const pratoIds = [
-                ...new Set((itens || []).map(item => item.prato_id))
-            ];
-
-            (itens || []).forEach(item => {
-                const chave = String(item.pedido_id);
-
-                if (!itensPorPedido.has(chave)) {
-                    itensPorPedido.set(chave, []);
-                }
-
-                itensPorPedido.get(chave).push(item);
+        if (existentes.length) {
+            comandaId = existentes[0].id;
+        } else {
+            const nova = await api("comanda", {
+                method: "POST",
+                headers: { Prefer: "return=representation" },
+                body: JSON.stringify({
+                    numero_mesa: mesa,
+                    status: "aberta",
+                    aberta_em: new Date().toISOString()
+                })
             });
 
-            if (pratoIds.length) {
-                const pratos = await api(
-                    `prato?select=id,nome,preco,preco_pequeno,preco_medio,preco_grande&id=in.(${pratoIds.join(",")})`
-                );
+            comandaId = nova[0].id;
+        }
 
-                (pratos || []).forEach(prato => {
-                    pratosPorId.set(String(prato.id), prato);
+        const novoPedido = await api("pedido", {
+            method: "POST",
+            headers: { Prefer: "return=representation" },
+            body: JSON.stringify({
+                comanda_id: comandaId,
+                status: "aceito",
+                criado_em: new Date().toISOString(),
+                atualizado_em: new Date().toISOString()
+            })
+        });
+
+        const pedidoId = novoPedido[0].id;
+
+        const itens = carrinho.map(item => ({
+            pedido_id: pedidoId,
+            prato_id: item.prato.id,
+            quantidade: item.quantidade,
+            preco_unitario: Number(item.prato.preco || 0)
+        }));
+
+        await api("item_pedido", {
+            method: "POST",
+            headers: { Prefer: "return=minimal" },
+            body: JSON.stringify(itens)
+        });
+
+        alert(`Pedido da mesa ${mesa} registrado com sucesso!`);
+
+        carrinho = [];
+        renderizarCarrinho();
+
+        await carregarDados();
+
+    } catch (erro) {
+        alert(`Não foi possível salvar o pedido: ${erro.message}`);
+        console.error(erro);
+    } finally {
+        botao.textContent = "Criar pedido para esta mesa";
+        botao.disabled = !carrinho.length;
+    }
+}
+
+/* =========================
+   COMANDAS EXISTENTES
+========================= */
+
+async function carregarDados() {
+    if (carregando) return;
+    carregando = true;
+
+    $("mensagem").textContent = "Carregando comandas...";
+
+    try {
+        comandas = await api(
+            "comanda?select=*&status=eq.aberta&order=aberta_em.desc"
+        ) || [];
+
+        pedidosPorComanda = new Map();
+        itensPorPedido = new Map();
+        pratosPorId = new Map();
+
+        comandas.forEach(c => {
+            pedidosPorComanda.set(String(c.id), []);
+        });
+
+        if (comandas.length) {
+            const ids = comandas.map(c => c.id);
+
+            const pedidos = await api(
+                `pedido?select=*&comanda_id=in.(${ids.join(",")})&order=criado_em.desc`
+            ) || [];
+
+            pedidos.forEach(p => {
+                pedidosPorComanda.get(String(p.comanda_id))?.push(p);
+                itensPorPedido.set(String(p.id), []);
+            });
+
+            const pedidoIds = pedidos.map(p => p.id);
+
+            if (pedidoIds.length) {
+                const itens = await api(
+                    `item_pedido?select=*&pedido_id=in.(${pedidoIds.join(",")})&order=id.asc`
+                ) || [];
+
+                const pratoIds = [...new Set(itens.map(i => i.prato_id))];
+
+                itens.forEach(item => {
+                    itensPorPedido.get(String(item.pedido_id))?.push(item);
                 });
+
+                if (pratoIds.length) {
+                    const dadosPratos = await api(
+                        `prato?select=id,nome,preco&id=in.(${pratoIds.join(",")})`
+                    ) || [];
+
+                    dadosPratos.forEach(prato => {
+                        pratosPorId.set(String(prato.id), prato);
+                    });
+                }
             }
         }
 
         atualizarResumo();
-        renderizar();
+        renderizarComandas();
 
-        mensagem.textContent = "";
+        $("mensagem").textContent = comandas.length
+            ? ""
+            : "Nenhuma comanda aberta no momento.";
 
-        document.getElementById("ultimaAtualizacao").textContent =
+        $("ultimaAtualizacao").textContent =
             `Atualizado às ${new Date().toLocaleTimeString("pt-BR", {
                 hour: "2-digit",
                 minute: "2-digit"
             })}`;
 
     } catch (erro) {
-        mensagem.textContent =
-            `Não foi possível carregar as comandas. ${erro.message}. ` +
-            "Verifique as políticas de SELECT nas tabelas comanda, pedido, item_pedido e prato.";
+        $("mensagem").textContent =
+            `Erro ao carregar comandas: ${erro.message}`;
 
-        lista.innerHTML = "";
-        console.error("Erro ao carregar comandas:", erro);
+        console.error(erro);
+    } finally {
+        carregando = false;
     }
 }
 
@@ -184,7 +435,7 @@ function statusMaisRelevante(pedidos) {
     ];
 
     return prioridade.find(status =>
-        pedidos.some(pedido => pedido.status === status)
+        pedidos.some(p => p.status === status)
     ) || "sem_pedidos";
 }
 
@@ -201,17 +452,13 @@ function rotuloStatus(status) {
 }
 
 function classeStatus(status) {
-    if (status === "pronto") {
-        return "selo-pronto";
-    }
+    if (status === "pronto") return "selo-pronto";
 
     if (["aceito", "preparando"].includes(status)) {
         return "selo-andamento";
     }
 
-    if (status === "entregue") {
-        return "selo-entregue";
-    }
+    if (status === "entregue") return "selo-entregue";
 
     return "";
 }
@@ -232,78 +479,67 @@ function totalComanda(comanda) {
 }
 
 function atualizarResumo() {
-    const todosPedidos = [...pedidosPorComanda.values()].flat();
+    const todos = [...pedidosPorComanda.values()].flat();
 
-    document.getElementById("contadorAbertas").textContent =
-        `${comandas.length} ${
-            comandas.length === 1
-                ? "comanda aberta"
-                : "comandas abertas"
-        }`;
+    $("contadorAbertas").textContent =
+        `${comandas.length} comandas abertas`;
 
-    document.getElementById("contAguardando").textContent =
-        todosPedidos.filter(
-            pedido => pedido.status === "aguardando_confirmacao"
+    $("contAguardando").textContent =
+        todos.filter(p => p.status === "aguardando_confirmacao").length;
+
+    $("contAndamento").textContent =
+        todos.filter(p =>
+            ["aceito", "preparando"].includes(p.status)
         ).length;
 
-    document.getElementById("contAndamento").textContent =
-        todosPedidos.filter(
-            pedido => ["aceito", "preparando"].includes(pedido.status)
-        ).length;
-
-    document.getElementById("contProntos").textContent =
-        todosPedidos.filter(
-            pedido => pedido.status === "pronto"
-        ).length;
+    $("contProntos").textContent =
+        todos.filter(p => p.status === "pronto").length;
 }
 
-function renderizar() {
-    const escolha = filtro.value;
+function renderizarComandas() {
+    const escolha = $("filtroStatus").value;
 
     const filtradas = comandas.filter(comanda => {
-        if (escolha === "todas") {
-            return true;
-        }
-
         const pedidos =
             pedidosPorComanda.get(String(comanda.id)) || [];
 
+        if (escolha === "todas") return true;
+
         if (escolha === "andamento") {
-            return pedidos.some(pedido =>
-                ["aceito", "preparando"].includes(pedido.status)
+            return pedidos.some(p =>
+                ["aceito", "preparando"].includes(p.status)
             );
         }
 
         if (escolha === "pronto") {
-            return pedidos.some(pedido => pedido.status === "pronto");
+            return pedidos.some(p => p.status === "pronto");
         }
 
-        return pedidos.some(pedido => pedido.status === escolha);
+        return pedidos.some(p => p.status === escolha);
     });
 
     if (!filtradas.length) {
-        lista.innerHTML = `
+        $("listaComandas").innerHTML = `
             <div class="vazio">
                 <strong>Nenhuma comanda para mostrar</strong>
-                Quando uma mesa fizer um pedido, ela aparecerá aqui.
+                As comandas abertas aparecerão aqui.
             </div>
         `;
         return;
     }
 
-    lista.innerHTML = filtradas.map(comanda => {
+    $("listaComandas").innerHTML = filtradas.map(comanda => {
         const pedidos =
             pedidosPorComanda.get(String(comanda.id)) || [];
 
         const status = statusMaisRelevante(pedidos);
 
-        const quantidadeItens = pedidos.reduce((total, pedido) => {
+        const quantidade = pedidos.reduce((total, pedido) => {
             const itens =
                 itensPorPedido.get(String(pedido.id)) || [];
 
             return total + itens.reduce(
-                (soma, item) => soma + Number(item.quantidade),
-                0
+                (soma, item) => soma + Number(item.quantidade), 0
             );
         }, 0);
 
@@ -312,7 +548,7 @@ function renderizar() {
                 <div class="cartao-topo">
                     <div>
                         <h3 class="mesa-numero">
-                            Mesa ${textoSeguro(comanda.numero_mesa)}
+                            Mesa ${seguro(comanda.numero_mesa)}
                         </h3>
                         <div class="meta">
                             Aberta em ${dataHora(comanda.aberta_em)}
@@ -320,42 +556,39 @@ function renderizar() {
                     </div>
 
                     <span class="selo ${classeStatus(status)}">
-                        ${textoSeguro(rotuloStatus(status))}
+                        ${seguro(rotuloStatus(status))}
                     </span>
                 </div>
 
                 <div class="cartao-corpo">
                     <div class="resumo-pedido">
-                        <span>Pedidos enviados</span>
+                        <span>Pedidos</span>
                         <strong>${pedidos.length}</strong>
                     </div>
 
                     <div class="resumo-pedido">
                         <span>Itens solicitados</span>
-                        <strong>${quantidadeItens}</strong>
+                        <strong>${quantidade}</strong>
                     </div>
 
                     <div class="valor-total">
                         ${brl(totalComanda(comanda))}
                     </div>
 
-                    <div class="acoes-cartao">
-                        <button
-                            class="botao botao-primario botao-pequeno"
-                            data-abrir="${comanda.id}"
-                        >
-                            Ver comanda
-                        </button>
-                    </div>
+                    <button
+                        class="botao botao-primario botao-pequeno"
+                        data-abrir="${comanda.id}">
+                        Ver comanda
+                    </button>
                 </div>
             </article>
         `;
     }).join("");
 
-    lista.querySelectorAll("[data-abrir]").forEach(botao => {
-        botao.addEventListener("click", () => {
-            abrirComanda(botao.dataset.abrir);
-        });
+    document.querySelectorAll("[data-abrir]").forEach(botao => {
+        botao.addEventListener("click", () =>
+            abrirComanda(botao.dataset.abrir)
+        );
     });
 }
 
@@ -373,25 +606,16 @@ function opcoesStatus(pedido) {
             ["recusado", "Recusar pedido"]
         ];
     } else if (pedido.status === "preparando") {
-        opcoes = [
-            ["pronto", "Marcar pronto"]
-        ];
+        opcoes = [["pronto", "Marcar pronto"]];
     } else if (pedido.status === "pronto") {
-        opcoes = [
-            ["entregue", "Confirmar entrega"]
-        ];
+        opcoes = [["entregue", "Confirmar entrega"]];
     }
 
     return opcoes.map(([valor, rotulo]) => `
         <button
-            class="botao ${
-                valor === "recusado"
-                    ? "botao-neutro"
-                    : "botao-secundario"
-            } botao-pequeno"
+            class="botao botao-secundario botao-pequeno"
             data-status="${valor}"
-            data-pedido="${pedido.id}"
-        >
+            data-pedido="${pedido.id}">
             ${rotulo}
         </button>
     `).join("");
@@ -399,97 +623,74 @@ function opcoesStatus(pedido) {
 
 function abrirComanda(id) {
     comandaSelecionada = comandas.find(
-        comanda => String(comanda.id) === String(id)
+        c => String(c.id) === String(id)
     );
 
-    if (!comandaSelecionada) {
-        return;
-    }
+    if (!comandaSelecionada) return;
 
-    document.getElementById("tituloModal").textContent =
+    $("tituloModal").textContent =
         `Mesa ${comandaSelecionada.numero_mesa}`;
 
-    const pedidos = pedidosPorComanda.get(String(id)) || [];
+    const pedidos =
+        pedidosPorComanda.get(String(id)) || [];
 
-    document.getElementById("detalhesComanda").innerHTML =
-        pedidos.map(pedido => {
-            const itens =
-                itensPorPedido.get(String(pedido.id)) || [];
+    $("detalhesComanda").innerHTML = pedidos.map(pedido => {
+        const itens =
+            itensPorPedido.get(String(pedido.id)) || [];
 
-            const linhas = itens.map(item => {
-                const prato = pratosPorId.get(String(item.prato_id));
+        const linhas = itens.map(item => {
+            const prato = pratosPorId.get(String(item.prato_id));
+            const nome = prato?.nome || `Prato #${item.prato_id}`;
 
-                const nomePrato =
-                    prato?.nome || `Prato #${item.prato_id}`;
-
-                const tamanho = item.tamanho
-                    ? ` (${textoSeguro(item.tamanho)})`
-                    : "";
-
-                const subtotal = item.subtotal ??
-                    Number(item.quantidade) * Number(item.preco_unitario);
-
-                return `
-                    <li>
-                        ${textoSeguro(item.quantidade)} ×
-                        ${textoSeguro(nomePrato)}
-                        ${tamanho} — ${brl(subtotal)}
-                    </li>
-                `;
-            }).join("");
-
-            const totalPedido = itens.reduce((soma, item) => {
-                return soma + Number(
-                    item.subtotal ??
-                    Number(item.quantidade) * Number(item.preco_unitario)
-                );
-            }, 0);
+            const subtotal = item.subtotal ??
+                Number(item.quantidade) * Number(item.preco_unitario);
 
             return `
-                <section class="pedido-bloco">
-                    <div class="pedido-cabecalho">
-                        <div>
-                            <h3>Pedido #${pedido.id}</h3>
-                            <span class="meta">
-                                ${dataHora(pedido.criado_em)}
-                            </span>
-                        </div>
-
-                        <span class="selo ${classeStatus(pedido.status)}">
-                            ${textoSeguro(rotuloStatus(pedido.status))}
-                        </span>
-                    </div>
-
-                    <ul class="pedido-itens">
-                        ${linhas || "<li>Itens não encontrados</li>"}
-                    </ul>
-
-                    <p>
-                        <strong>Total: ${brl(totalPedido)}</strong>
-                    </p>
-
-                    <div class="acoes-cartao">
-                        ${opcoesStatus(pedido)}
-                    </div>
-                </section>
+                <li>
+                    ${seguro(item.quantidade)} ×
+                    ${seguro(nome)} — ${brl(subtotal)}
+                </li>
             `;
-        }).join("") || `
-            <div class="vazio">
-                <strong>Esta comanda ainda não tem pedidos</strong>
-            </div>
+        }).join("");
+
+        const total = itens.reduce((soma, item) => {
+            return soma + Number(
+                item.subtotal ??
+                Number(item.quantidade) * Number(item.preco_unitario)
+            );
+        }, 0);
+
+        return `
+            <section class="pedido-bloco">
+                <div class="pedido-cabecalho">
+                    <div>
+                        <h3>Pedido #${pedido.id}</h3>
+                        <span class="meta">${dataHora(pedido.criado_em)}</span>
+                    </div>
+
+                    <span class="selo ${classeStatus(pedido.status)}">
+                        ${seguro(rotuloStatus(pedido.status))}
+                    </span>
+                </div>
+
+                <ul class="pedido-itens">
+                    ${linhas || "<li>Itens não encontrados</li>"}
+                </ul>
+
+                <p><strong>Total: ${brl(total)}</strong></p>
+
+                <div class="acoes-cartao">
+                    ${opcoesStatus(pedido)}
+                </div>
+            </section>
         `;
+    }).join("") || `
+        <div class="vazio">
+            <strong>Esta comanda ainda não tem pedidos</strong>
+        </div>
+    `;
 
-    const botaoEncerrar = document.getElementById("encerrarBtn");
-
-    botaoEncerrar.disabled = pedidos.some(pedido =>
-        !["entregue", "recusado"].includes(pedido.status)
-    );
-
-    botaoEncerrar.title = botaoEncerrar.disabled
-        ? "Todos os pedidos precisam estar entregues ou recusados para encerrar."
-        : "Encerrar e manter o histórico da comanda";
-
-    document.querySelectorAll("[data-status]").forEach(botao => {
+    $("detalhesComanda").querySelectorAll("[data-status]").forEach(botao => {
         botao.addEventListener("click", () => {
             atualizarStatus(
                 botao.dataset.pedido,
@@ -498,74 +699,78 @@ function abrirComanda(id) {
         });
     });
 
+    $("encerrarBtn").disabled = pedidos.some(p =>
+        !["entregue", "recusado"].includes(p.status)
+    );
+
     modal.showModal();
 }
 
 async function atualizarStatus(pedidoId, status) {
     if (!confirm(
-        `Confirmar alteração do pedido #${pedidoId} para "${rotuloStatus(status)}"?`
-    )) {
-        return;
-    }
+        `Alterar o pedido para "${rotuloStatus(status)}"?`
+    )) return;
 
     try {
-        await api(
-            `pedido?id=eq.${encodeURIComponent(pedidoId)}`,
-            {
-                method: "PATCH",
-                headers: {
-                    Prefer: "return=minimal"
-                },
-                body: JSON.stringify({
-                    status,
-                    atualizado_em: new Date().toISOString()
-                })
-            }
-        );
+        await api(`pedido?id=eq.${encodeURIComponent(pedidoId)}`, {
+            method: "PATCH",
+            headers: { Prefer: "return=minimal" },
+            body: JSON.stringify({
+                status,
+                atualizado_em: new Date().toISOString()
+            })
+        });
+
+        const idComanda = comandaSelecionada?.id;
 
         await carregarDados();
 
-        if (comandaSelecionada) {
-            abrirComanda(comandaSelecionada.id);
+        if (idComanda) {
+            const aindaAberta = comandas.find(
+                c => String(c.id) === String(idComanda)
+            );
+
+            if (aindaAberta) {
+                abrirComanda(idComanda);
+            } else {
+                modal.close();
+                comandaSelecionada = null;
+            }
         }
 
     } catch (erro) {
-        alert(`Não foi possível atualizar o pedido. ${erro.message}`);
-        console.error("Erro ao atualizar pedido:", erro);
+        alert(`Erro ao atualizar pedido: ${erro.message}`);
+        console.error(erro);
     }
 }
 
+/* Fecha a comanda, mas NÃO exclui o histórico. */
+
 async function encerrarComanda() {
-    if (!comandaSelecionada) {
-        return;
-    }
+    if (!comandaSelecionada) return;
 
     const pedidos =
         pedidosPorComanda.get(String(comandaSelecionada.id)) || [];
 
-    if (pedidos.some(pedido =>
-        !["entregue", "recusado"].includes(pedido.status)
+    if (pedidos.some(p =>
+        !["entregue", "recusado"].includes(p.status)
     )) {
         alert(
-            "Antes de encerrar, todos os pedidos precisam estar entregues ou recusados."
+            "Todos os pedidos precisam estar entregues ou recusados antes de encerrar."
         );
         return;
     }
 
     if (!confirm(
-        `Encerrar a comanda da mesa ${comandaSelecionada.numero_mesa}? O histórico será mantido no banco de dados.`
-    )) {
-        return;
-    }
+        `Encerrar a comanda da mesa ${comandaSelecionada.numero_mesa}? O histórico será mantido.`
+    )) return;
 
     try {
         await api(
             `comanda?id=eq.${encodeURIComponent(comandaSelecionada.id)}&status=eq.aberta`,
             {
                 method: "PATCH",
-                headers: {
-                    Prefer: "return=minimal"
-                },
+                headers: { Prefer: "return=minimal" },
                 body: JSON.stringify({
                     status: "fechada",
                     fechada_em: new Date().toISOString()
@@ -579,22 +784,37 @@ async function encerrarComanda() {
         await carregarDados();
 
     } catch (erro) {
-        alert(`Não foi possível encerrar a comanda. ${erro.message}`);
-        console.error("Erro ao encerrar comanda:", erro);
+        alert(`Erro ao encerrar comanda: ${erro.message}`);
+        console.error(erro);
     }
 }
 
-document.getElementById("atualizarBtn")
-    .addEventListener("click", carregarDados);
+/* =========================
+   EVENTOS E INICIALIZAÇÃO
+========================= */
 
-filtro.addEventListener("change", renderizar);
+$("pesquisaPratos").addEventListener("input", renderizarPratos);
 
-document.getElementById("fecharModal")
-    .addEventListener("click", () => modal.close());
+$("confirmarComandaBtn").addEventListener(
+    "click",
+    criarPedidoGarcom
+);
 
-document.getElementById("encerrarBtn")
-    .addEventListener("click", encerrarComanda);
+$("atualizarBtn").addEventListener("click", async () => {
+    await carregarPratos();
+    await carregarDados();
+});
 
+$("filtroStatus").addEventListener("change", renderizarComandas);
+
+$("fecharModal").addEventListener("click", () => {
+    $("modalComanda").close();
+});
+
+$("encerrarBtn").addEventListener("click", encerrarComanda);
+
+renderizarCarrinho();
+carregarPratos();
 carregarDados();
 
 setInterval(carregarDados, 30000);
